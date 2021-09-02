@@ -9,7 +9,7 @@ import random
 
 import pytest
 
-from resultsdb import *
+from resultsdbrg import *
 
 
 def _dump(d, tprint):

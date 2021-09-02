@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-sys.path.append("../resultsdb")
+sys.path.append("../resultsdbrg")
 
 
 @pytest.fixture(scope="session", autouse=True)
