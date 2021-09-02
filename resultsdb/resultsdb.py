@@ -21,8 +21,6 @@ from dateutil.parser import parse
 import requests
 from tzlocal import get_localzone
 
-from nflschedule import *
-
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
@@ -44,7 +42,102 @@ HEADERS = {
 }
 
 
-def get_contests(slate: str, ownership: bool = True) -> dict:
+def _dump(d: dict) -> None:
+    """Dumps key / value for scalar and type for list/dict
+    
+    Args:
+        d (dict): the dict to dump
+
+    Returns:
+        None
+
+    """
+    for k, v in d.items():
+        if isinstance(v, (str, float, int)):
+            print(k, v)
+        else:
+            print(k, type(v))
+
+
+def days_hours_minutes(td):
+    """Converts time delta into tuple of days, hours, minutes
+
+    Args:
+        td (datetime.timedelta): the timedelta object
+
+    Returns:
+        Tuple[int, int, int]
+
+    """
+    return td.days, td.seconds // 3600, (td.seconds // 60) % 60
+
+
+def find_contests(contests: List[dict], filters: dict) -> dict:
+    """Finds contests according to filters
+    
+    Args:
+        contests (List[dict]): the contests
+        filters (dict): the filters for the find
+
+    Returns:
+        dict
+
+    """
+    for k, v in filters.items():
+        comp, val = v
+        if comp == 'eq':
+            contests = [c for c in contests if c[k] == val]
+        if comp == 'like':
+            contests = [c for c in contests if c[k] in val]
+        if comp == 'lte':
+            contests = [c for c in contests if c[k] <= val]
+        if comp == 'gte':
+            contests = [c for c in contests if c[k] >= val]
+        
+    return contests
+
+
+def find_milly(contests: List[dict]) -> dict():
+    """Finds the Millionaire Maker contest
+    
+        Args:
+        contests (List[dict]): the contests
+    
+    Returns:
+        dict
+        
+    """
+    # if there are multiple milly makers, then gets the one with lower entry fee
+    mm = [c for c in contests if 'Millionaire' in c['name']]
+    entry_fees = [c['entryFee'] for c in contests]
+    return mm[entry_fees.index(min(entry_fees))]
+
+
+def find_main_slate(slates: List[dict], sport: int = 1, game_count: int = 7, slate_type: str = 'Classic'):
+    """Finds main slate from list of slates"""
+    fbslates = [s for s in slates if
+                s['gameCount'] > game_count and 
+                s['sport'] == sport and 
+                s['slateTypeName'] == slate_type]
+
+    # if the time test fails, then fall back to the 2nd largest slate
+    game_counts = sorted([s['gameCount'] for s in fbslates], reverse=True)
+
+    for s in fbslates:
+        # easiest test is to check delta between start and end
+        start = parse(s['start']).astimezone(get_localzone())
+        end = parse(s['end']).astimezone(get_localzone())
+        timediff = days_hours_minutes(end - start)
+        if timediff in [(0, 3, 25), (0, 3, 10), (0, 3, 20)]:
+            return s['_id']
+        if s['gameCount'] == game_counts[1]:
+            return s['_id']
+
+    logging.warning('Could not find main slate')   
+    return None
+
+
+def get_contests(slate: str, ownership: bool = True) -> List(dict):
     """Gets contests for a given slate
     
     Args:
@@ -52,7 +145,7 @@ def get_contests(slate: str, ownership: bool = True) -> dict:
         ownership (bool): include ownership data, default True
 
     Returns:
-        dict
+        List(dict)
 
     """
     url = 'https://resultsdb-api.rotogrinders.com/api/contests'
@@ -90,7 +183,7 @@ def get_entries(contest_id: str, n_entries: int = 10) -> dict:
     return r.json()
 
 
-def get_slates(start: str, site: int = 20) -> dict:
+def get_slates(start: str, site: int = 20) -> List(dict):
     """Gets slate for particular day and site
     
     Args:
@@ -98,7 +191,7 @@ def get_slates(start: str, site: int = 20) -> dict:
         site (int): default 20, which is dk
 
     Returns:
-        dict
+        List(dict)
 
     """
     url = 'https://resultsdb-api.rotogrinders.com/api/slates'
@@ -107,31 +200,176 @@ def get_slates(start: str, site: int = 20) -> dict:
     return r.json()
 
 
+def parse_results(results: List[dict]) -> List[dict]:
+    """Parses contest entry
+    
+    Args:
+        results (List[dict]): the contst results
 
-def find_main_slate(slate):
-    """Finds main slate from list of slates"""
-    fbslates = [s for s in slate if
-                s['gameCount'] > 5 and 
-                s['sport'] == 1 and 
-                s['slateTypeName'] == "Classic"]
+    Returns:
+        Tuple[List[dict]]
 
-    # if the time test fails, then fall back to the 2nd largest slate
-    game_counts = sorted([s['gameCount'] for s in fbslates], reverse=True)
-
-    for s in fbslates:
-        # easiest test is to check delta between start and end
-        start = parse(s['start']).astimezone(get_localzone())
-        end = parse(s['end']).astimezone(get_localzone())
-        if days_hours_minutes(end - start) == (0, 3, 25):
-            return s['_id']
-        if s['gameCount'] == game_counts[1]:
-            return s['_id']
-
-    logging.warning('Could not find main slate')   
-    return fbslates
+    """
+    wanted = ['userEntryCount', 'siteScreenName', 'rank', 'points', 'salaryUsed', '_contestId']
+    data = []
+    for e in results['entries']:
+        d = {k: e[k] for k in wanted}
+        lu = {}
+        for pos, players in e['lineup'].items():
+            for p in players:
+                if isinstance(p, dict):
+                     lu[p['name']] = (pos, p['_slatePlayerId'])
+        d['lineup'] = lu
+        data.append(d)
+    return data
 
 
-def slate_schema() -> str:
+def parse_slate(slate):
+    """Parses slate document
+    
+    Args:
+        slate (dict): slate document
+
+    Returns:
+        dict
+
+    """
+    wanted = ['_id', 'slateTypeName', 'siteSlateId', 'gameCount', 'start', 'end', 'sport']
+    return {k: slate[k] for k in wanted} 
+
+
+def parse_slate_games(slate: dict) -> List[dict]:
+    """Parses slate games
+    
+    Args:
+        slate (dict): slate document
+
+    Returns:
+        List[dict]
+
+    """
+    games = []
+    for game in slate['slateGames']:
+        wanted = ['date', 'id']
+        vegas = ['line', 'o/u', 'total', 'opp_total']
+        g = {k: game[k] for k in wanted}
+        g['teamHome'] = game['teamHome']['hashtag']
+        g['teamAway'] = game['teamAway']['hashtag']
+        for item in vegas:
+            g[item] = game[item]
+        games.append(g)
+    return games
+
+
+def parse_slate_projected_optimal(slate: dict) -> List[dict]:
+    """Parses slate projected optimal lineup
+       This is not the actual optimal lineup, is just their projected lineup with highest raw projection
+
+    Args:
+        slate (dict): slate document
+
+    Returns:
+        List[dict]
+    
+    """
+    wanted = ['name', 'position', 'salary', 'fpts', 'ownership']
+    d = {k: slate[k] for k in wanted}
+    try:
+        d['ownership'] = float(d['ownership'].str.replace('%', ''))
+    except:
+        d['ownership'] = None
+
+
+def parse_slate_players(slate: dict) -> List[dict]:
+    """Parses slate players
+    
+    Args:
+        slate (dict): slate document
+
+    Returns:
+        List[dict]
+
+    """
+    wanted = ['dkName', 'slatePosition', 'siteSlatePlayerId', 'rgPlayerId', 'team', 'salary']
+    return {k: slate[k] for k in wanted} 
+
+
+def schema_contest() -> str:
+    """Schema for contest document"""
+    return """
+        _id 5f70c6f3430508338f95ddab
+        winner
+        slateType 1
+        gameCount 13
+        siteSlateId 39913
+        start 2020-09-27T17:00:00.000Z
+        sport 1
+        prizePool 4275000
+        maxEntriesPerUser 150
+        maxEntries 251470
+        entryFee 20
+        name NFL $4.25M Fantasy Football Millionaire [$1M to 1st + ToC Entry]
+        siteContestId 92556624
+        _slateId 5f70c6aaed428f3375ac25cb
+        entryCount 249799
+        rgPrizePool 588146.0700000001
+        rgPrizeWinnerCount 11432
+        complete True
+        prizes
+   
+    """
+
+
+def schema_entry() -> str:
+    """Schema for entry document"""
+    return """
+        timestamp <class 'str'>
+        page <class 'int'>
+        entries <class 'list'>
+        count <class 'int'>
+
+        entry:
+            _id <class 'str'>
+            userEntryCount <class 'int'>
+            siteScreenName <class 'str'>
+            user <class 'dict'>
+            siteEntryId <class 'str'>
+            rank <class 'int'>
+            timeRemaining <class 'int'>
+            points <class 'float'>
+            lineup <class 'dict'>
+            salaryUsed <class 'int'>
+            _contestId <class 'str'>
+            slotsRemaining <class 'int'>
+            prize <class 'dict'>
+            createdAt <class 'str'>
+
+        lineup:
+            {'DST': [{'_slatePlayerId': '5f7147dd430508338fc85203', 'name': 'Colts'}],
+            'TE': [{'_slatePlayerId': '5f7147dd430508338fc85227',
+            'name': 'Austin Hooper'}],
+            'WR': [{'_slatePlayerId': '5f7147dd430508338fc852a6', 'name': 'DK Metcalf'},
+            {'_slatePlayerId': '5f7147dd430508338fc852a3', 'name': 'Tyler Lockett'},
+            {'_slatePlayerId': '5f7147dd430508338fc85275', 'name': 'Michael Gallup'}],
+            'RB': [{'_slatePlayerId': '5f7147dd430508338fc851f2', 'name': 'Jeff Wilson'},
+            {'_slatePlayerId': '5f7147dd430508338fc85200', 'name': 'Rex Burkhead'}],
+            'FLEX': [{'_slatePlayerId': '5f7147dd430508338fc852be',
+            'name': 'Derrick Henry'}],
+            'QB': [{'_slatePlayerId': '5f7147dd430508338fc852ba',
+            'name': 'Russell Wilson'}],
+            'summary': ['Russell Wilson',
+            'Derrick Henry',
+            'Jeff Wilson',
+            'Rex Burkhead',
+            'DK Metcalf',
+            'Tyler Lockett',
+            'Michael Gallup',
+            'Austin Hooper',
+            'Colts']}
+    """
+
+
+def schema_slate() -> str:
     """Shows schema of slate document
     
     Args:
