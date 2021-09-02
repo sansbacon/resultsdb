@@ -1,9 +1,7 @@
+# resultsdb/setup.py
 # -*- coding: utf-8 -*-
-"""
-setup.py
-
-installation script
-"""
+# Copyright (C) 2021 Eric Truett
+# Licensed under the MIT License
 
 from setuptools import setup, find_packages
 
@@ -21,7 +19,7 @@ def run():
           entry_points={'console_scripts': ['rdb=scripts.resultsdb:main']},
           package_data={PACKAGE_NAME: ["data/*.*"]},
           zip_safe=False,
-          install_requires=["python-dateutil>=2.4", "tzlocal", "requests"],
+          install_requires=["python-dateutil", "tzlocal", "requests"],
     )
 
 

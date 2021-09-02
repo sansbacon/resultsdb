@@ -1,4 +1,4 @@
-# bestballsim/tests/conftest.py
+# resultsdb/tests/conftest.py
 # -*- coding: utf-8 -*-
 # Copyright (C) 2021 Eric Truett
 # Licensed under the MIT License
@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-sys.path.append("../bestballsim")
+sys.path.append("../resultsdb")
 
 
 @pytest.fixture(scope="session", autouse=True)

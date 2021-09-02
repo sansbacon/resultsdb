@@ -1,170 +1,138 @@
-# bestballsim/tests/test_byes.py
+# resultsdb/tests/test_resultsdb.py
 # -*- coding: utf-8 -*-
 # Copyright (C) 2021 Eric Truett
 # Licensed under the MIT License
 
-import numpy as np
-from numpy.core.numeric import ones
-import pandas as pd
+import datetime
+import json
+import random
 
 import pytest
 
+from resultsdb import *
 
-from bestballsim.byes import *
 
-
-def onesie_data(n=2, w=16):
-    return np.random.randint(low=1, high=30, size=(n, w))
+def _dump(d, tprint):
+    """Dumps first level of dict"""
+    for k, v in d.items():
+        if isinstance(v, (str, float, int)):
+            tprint((k, v))
+        else:
+            tprint((k, type(v)))
 
 
 @pytest.fixture
-def season_data(test_directory):
-    return pd.read_csv(test_directory / 'season_data.csv')
+def contests(root_directory):
+    pth = root_directory / 'resultsdb' / 'data' / 'contests.json'
+    return json.loads(pth.read_text())
 
 
 @pytest.fixture
-def weekly_data(test_directory):
-    return pd.read_csv(test_directory / 'weekly_data.csv')
+def results(root_directory):
+    pth = root_directory / 'resultsdb' / 'data' / 'results.json'
+    return json.loads(pth.read_text())
 
 
-def test_addbye_invalid_n_same_bye():
-    """Tests byesim on the onesie positions with invalid n_same_bye"""
-    players = onesie_data()
-    with pytest.raises(ValueError):
-        new_players = addbye(players, n_same_bye=3)
+@pytest.fixture
+def slates(root_directory):
+    pth = root_directory / 'resultsdb' / 'data' / 'slates.json'
+    return json.loads(pth.read_text())
 
 
-def test_addbye_2D_valid_n_same_bye():
-    """Tests byesim on the onesie positions with valid n_same_bye"""
-    players = onesie_data()
-    new_players = addbye(players, n_same_bye=0)
-    assert new_players[0, 0] == 0
-    assert new_players[1, 0] != 0
-
-    players = onesie_data(n=4)
-    new_players = addbye(players, n_same_bye=1)
-    assert new_players[0, 0] == 0
-    assert new_players[1, 0] != 0
-    assert new_players[2, 0] != 0
-    assert new_players[3, 0] == 0
+def test_days_hours_minutes():
+    """Tests days_hours_minutes"""
+    td = datetime.date(2021, 9, 1) - datetime.date(2021, 8, 31)
+    assert days_hours_minutes(td) == (1, 0, 0)
+    td = datetime.datetime(2021, 9, 1, 15, 0, 0) - datetime.datetime(2021, 9, 1, 11, 30, 0)
+    assert days_hours_minutes(td) == (0, 3, 30)
 
 
-def test_addbye_3D_valid_n_same_bye():
-    """Tests byesim on the onesie positions with valid n_same_bye"""
-    players = onesie_data()
-    rows = 5
-    sp = shuffled_players(players, rows=rows)
-    new_players = addbye(sp, n_same_bye=0)
-    assert np.array_equal(new_players[:, 0, 0], np.zeros(rows))
-    assert np.array_equal(new_players[:, 1, 1], np.zeros(rows))
-
-    players = onesie_data(n=4)
-    rows = 5
-    sp = shuffled_players(players, rows=rows)
-    new_players = addbye(sp, n_same_bye=1)
-    assert np.array_equal(new_players[:, 0, 0], np.zeros(rows))
-    assert np.array_equal(new_players[:, 1, 1], np.zeros(rows))
-    assert np.array_equal(new_players[:, 3, 0], np.zeros(rows))
+def test_find_contests(contests):
+    """tests find_contests"""
+    filters = {'name': ('like', 'Million')}
+    c = find_contests(contests, filters)
+    assert 'Millionaire' in c[0]['name']
 
 
-def test_shuffled_indices():
-    """Tests shuffled_indices"""
-    # test that shuffle changes order
-    high = 16
-    rows = 1
-    players = onesie_data()
-    idx = shuffled_indices(0, high, rows)
-    assert idx.shape == (rows, high)
-    shuffled_players = players[:, idx[0]]
-    assert players.tolist() != shuffled_players.tolist()
-    assert set(players[0]) == set(shuffled_players[0])
+def test_find_milly(contests):
+    """tests find_milly"""
+    c = find_milly(contests)
+    assert 'Millionaire' in c['name']
 
 
-def test_bb_scoring_onesie_2D(tprint):
-    """Tests bb_scoring for onesie position"""
-    players = np.array([[1, 2, 3, 10], [10, 10, 10, 1]])
-    scores = bbscoring(players, 1)
-    assert np.array_equal(scores[0], np.array([10, 10, 10, 10]))
+def test_find_main_slate(slates):
+    """Finds main slate from list of slates"""
+    s = find_main_slate(slates)
+    assert isinstance(s, str)
 
 
-def test_bb_scoring_multi_2D():
-    """Tests bb_scoring for multiplayer position"""
-    players = (
-        np.array([
-            [1, 2, 2, 1], 
-            [10, 4, 1, 1],
-            [20, 20, 20, 20]
-        ])
-    )
-    
-    scoring = bbscoring(players, 2)
-    expected_scoring = np.array([[20] * 4, [10, 4, 2, 1]])
-    assert np.array_equal(scoring, expected_scoring)
+@pytest.mark.skip
+def test_get_contests():
+    """Tests get_contests"""
+    pass
+
+@pytest.mark.skip
+def test_get_entries():
+    """Tests get entries"""
+    pass
 
 
-def test_bb_scoring_onesie_3D(tprint):
-    """Tests bb_scoring for onesie position"""
-    players = np.array([[[1, 2, 3, 10], [10, 10, 10, 1]], [[1, 2, 3, 10], [10, 10, 10, 1]]])
-    scores = bbscoring(players, 1)
-    comp = np.array([[[10, 10, 10, 10]], [[10, 10, 10, 10]]])
-    assert np.array_equal(scores, comp)
+@pytest.mark.skip
+def test_get_slates():
+    """Tests get slates"""
+    pass
 
 
-def test_bb_scoring_multi_3D(tprint):
-    """Tests bb_scoring for multiplayer position"""
-    players = (
-        np.array([[
-            [1, 2, 2, 1], 
-            [10, 4, 1, 1],
-            [20, 20, 20, 20]
-        ],
-        [   [1, 2, 2, 1], 
-            [10, 4, 1, 1],
-            [20, 20, 20, 20]
-        ]
-        ])
-    )
-    
-    scoring = bbscoring(players, 2)
-    expected_scoring = np.array([
-        [[20] * 4, [10, 4, 2, 1]],
-        [[20] * 4, [10, 4, 2, 1]]
-    ])
-
-    assert np.array_equal(scoring, expected_scoring)
+def test_parse_results(results):
+    """Tests parse_results"""
+    r = parse_results(results)
+    assert isinstance(r, list)
+    for k in ['userEntryCount', 'siteScreenName', 'rank', 'points', 'salaryUsed', '_contestId', 'lineup']:
+        assert k in random.choice(r)
 
 
-def test_score_summary_2D(tprint):
-    """Tests score_summary on 2D array"""
-    scores = np.array([[10, 10, 10, 10], [10, 10, 10, 10]])
-    expected = np.array([20] * 4)
-    assert np.array_equal(score_summary(scores), expected)
+def test_parse_slate(slates):
+    """tests parse_slate"""
+    s = parse_slate(slates[0])
+    assert isinstance(s, dict)
+    wanted = {'_id', 'slateTypeName', 'siteSlateId', 'gameCount', 'start', 'end', 'sport'}
+    assert set(s.keys()) == wanted
 
 
-def test_score_summary_3D(tprint):
-    """Tests score_summary on 3D array"""
-    scores = np.array([
-        [
-          [20] * 4, 
-          [10, 4, 2, 1]
-        ],
-        [
-          [20] * 4, 
-          [10, 4, 2, 1]
-        ]
-    ])
-
-    expected = np.tile(np.array([30, 24, 22, 21]), 2).reshape(2, 4)
-    assert np.array_equal(score_summary(scores), expected)
+def test_parse_slate_games(slates, tprint):
+    """tests parse_slate_games"""
+    s = random.choice(slates)
+    sg = parse_slate_games(s)
+    assert isinstance(sg, list)
+    sgg = random.choice(sg)
+    tprint(sgg)
+    assert set(sgg.keys()) == {'date', 'id', 'line', 'o/u', 'total', 'opp_total', 'teamHome', 'teamAway'}
 
 
-def test_shuffled_players():
-    """Tests shuffled_players"""
-    players = onesie_data()
-    low = 0
-    high = players.shape[1]
-    rows = 5
-    new_players = shuffled_players(players, low, high, rows)
-    assert new_players.shape == (rows, players.shape[0], players.shape[1])
+def test_parse_slate_projected_optimal(slates, tprint):
+    """Parses slate projected optimal lineup"""
+    s = random.choice([item for item in slates if item.get('optimalLineup')])
+    #_dump(s.get('optimalLineup')[0], tprint)
+    opt = parse_slate_projected_optimal(s)
+    assert isinstance(opt, list)
+    assert isinstance(random.choice(opt), dict)
+    o = s.pop('optimalLineup')
+    assert parse_slate_projected_optimal(s) is None
+  
+
+def test_parse_slate_players(slates):
+    """Tests parse_slate_players"""
+    s = random.choice(slates)
+    p = parse_slate_players(s)    
+    assert isinstance(p, list)
+    assert isinstance(random.choice(p), dict)
+    assert set(random.choice(p).keys()) == {'dkName', 'slatePosition', 'siteSlatePlayerId', 'rgPlayerId', 'team', 'salary'}
 
 
+def test_slate_teams(slates):
+    """Tests slate_teams"""
+    s = random.choice(slates)
+    st = slate_teams(s)
+    assert isinstance(st, set)
+    assert isinstance(random.choice(list(st)), str)
+    assert len(st) // 2 == s['gameCount']

@@ -88,7 +88,7 @@ def find_contests(contests: List[dict], filters: dict) -> dict:
         if comp == 'eq':
             contests = [c for c in contests if c[k] == val]
         if comp == 'like':
-            contests = [c for c in contests if c[k] in val]
+            contests = [c for c in contests if val in c[k]]
         if comp == 'lte':
             contests = [c for c in contests if c[k] <= val]
         if comp == 'gte':
@@ -108,13 +108,27 @@ def find_milly(contests: List[dict]) -> dict():
         
     """
     # if there are multiple milly makers, then gets the one with lower entry fee
-    mm = [c for c in contests if 'Millionaire' in c['name']]
+    filters = {'name': ('like', 'Million')}
+    mm = find_contests(contests, filters)
+    if len(mm) == 1:
+        return mm[0]
     entry_fees = [c['entryFee'] for c in contests]
     return mm[entry_fees.index(min(entry_fees))]
 
 
-def find_main_slate(slates: List[dict], sport: int = 1, game_count: int = 7, slate_type: str = 'Classic'):
-    """Finds main slate from list of slates"""
+def find_main_slate(slates: List[dict], sport: int = 1, game_count: int = 7, slate_type: str = 'Classic') -> str:
+    """Finds main slate from list of slates
+    
+    Args:
+        slates (List[dict]): the slates document
+        sport (int): default 1 (NFL)
+        game_count (int): the threshold games in the main slate, default 7
+        slate_type (str): default 'Classic'
+
+    Returns:
+        str
+
+    """
     fbslates = [s for s in slates if
                 s['gameCount'] > game_count and 
                 s['sport'] == sport and 
@@ -137,7 +151,7 @@ def find_main_slate(slates: List[dict], sport: int = 1, game_count: int = 7, sla
     return None
 
 
-def get_contests(slate: str, ownership: bool = True) -> List(dict):
+def get_contests(slate: str, ownership: bool = True) -> List[dict]:
     """Gets contests for a given slate
     
     Args:
@@ -145,7 +159,7 @@ def get_contests(slate: str, ownership: bool = True) -> List(dict):
         ownership (bool): include ownership data, default True
 
     Returns:
-        List(dict)
+        List[dict]
 
     """
     url = 'https://resultsdb-api.rotogrinders.com/api/contests'
@@ -183,7 +197,7 @@ def get_entries(contest_id: str, n_entries: int = 10) -> dict:
     return r.json()
 
 
-def get_slates(start: str, site: int = 20) -> List(dict):
+def get_slates(start: str, site: int = 20) -> List[dict]:
     """Gets slate for particular day and site
     
     Args:
@@ -191,7 +205,7 @@ def get_slates(start: str, site: int = 20) -> List(dict):
         site (int): default 20, which is dk
 
     Returns:
-        List(dict)
+        List[dict]
 
     """
     url = 'https://resultsdb-api.rotogrinders.com/api/slates'
@@ -207,7 +221,7 @@ def parse_results(results: List[dict]) -> List[dict]:
         results (List[dict]): the contst results
 
     Returns:
-        Tuple[List[dict]]
+        List[dict]
 
     """
     wanted = ['userEntryCount', 'siteScreenName', 'rank', 'points', 'salaryUsed', '_contestId']
@@ -256,7 +270,7 @@ def parse_slate_games(slate: dict) -> List[dict]:
         g['teamHome'] = game['teamHome']['hashtag']
         g['teamAway'] = game['teamAway']['hashtag']
         for item in vegas:
-            g[item] = game[item]
+            g[item] = game['vegas'].get(item)
         games.append(g)
     return games
 
@@ -272,12 +286,19 @@ def parse_slate_projected_optimal(slate: dict) -> List[dict]:
         List[dict]
     
     """
+    players = []
+    opt = slate.get('optimalLineup')
+    if not opt:
+        return None
     wanted = ['name', 'position', 'salary', 'fpts', 'ownership']
-    d = {k: slate[k] for k in wanted}
-    try:
-        d['ownership'] = float(d['ownership'].str.replace('%', ''))
-    except:
-        d['ownership'] = None
+    for item in opt:
+        player = {k: item[k] for k in wanted}
+        try:
+            player['ownership'] = float(player['ownership'].str.replace('%', ''))
+        except:
+            player['ownership'] = None
+        players.append(player)
+    return players
 
 
 def parse_slate_players(slate: dict) -> List[dict]:
@@ -291,7 +312,7 @@ def parse_slate_players(slate: dict) -> List[dict]:
 
     """
     wanted = ['dkName', 'slatePosition', 'siteSlatePlayerId', 'rgPlayerId', 'team', 'salary']
-    return {k: slate[k] for k in wanted} 
+    return [{k: p.get(k) for k in wanted} for p in slate.get('slatePlayers')]
 
 
 def schema_contest() -> str:
